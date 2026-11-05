@@ -1,0 +1,7 @@
+# Fins de ligne normalisées dans le dépôt
+* text=auto
+
+# Fichiers exécutés sous Linux (conteneurs, bash) : toujours LF
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+.dockerignore text eol=lf

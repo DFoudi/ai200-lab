@@ -1,0 +1,13 @@
+# Fichiers générés par la compilation locale (Windows) : ne jamais les envoyer au build
+**/bin
+**/obj
+bin
+obj
+
+# Fichiers d'IDE
+.vs
+.vscode
+*.user
+
+# Documentation
+*.md
