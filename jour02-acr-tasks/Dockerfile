@@ -30,7 +30,7 @@ WORKDIR /app
 
 ENV ASPNETCORE_HTTP_PORTS=8000 \
     APP_MESSAGE="Bonjour depuis ACR Tasks" \
-    APP_VERSION="jour2"
+    APP_VERSION="jour2-trigger"
 # DB_PASSWORD n'est volontairement PAS ici : injecté à l'exécution.
 
 EXPOSE 8000
