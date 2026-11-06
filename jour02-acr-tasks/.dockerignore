@@ -1,0 +1,13 @@
+# Fichiers générés localement (chemins Windows) : jamais dans le contexte de build
+**/bin
+**/obj
+bin
+obj
+
+# IDE
+.vs
+.vscode
+*.user
+
+# Inutile au build
+*.md

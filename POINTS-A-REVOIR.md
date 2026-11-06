@@ -172,3 +172,134 @@ Pour chaque point : la confusion de départ, puis l'explication à retenir.
     ```
     Analogie C# : `ARG` = paramètre de méthode avec valeur par défaut (`string appVersion = "dev"`), `ENV` = recopier ce paramètre dans une propriété pour qu'il survive (`this.AppVersion = appVersion`).
   - Les différences de comportement entre versions se documentent dans des **release notes** ou un **CHANGELOG**.
+
+---
+
+## Jour 2 : ACR Tasks (5 novembre 2026)
+
+### Écrire un test d'API avec xUnit et WebApplicationFactory
+
+- **Confusion :** j'ai écrit `new HttpClient()` et je ne savais pas comment relier le test à l'API. Les tests, les factories et `async`/`await` sont nouveaux pour moi.
+- **À retenir :**
+  - `new HttpClient()` crée un client **vide** : il ne connaît aucune adresse et n'est relié à rien. Il ne peut pas appeler mon API.
+  - `WebApplicationFactory<Program>` = une **usine** qui démarre mon API **en mémoire** (sans port réseau). C'est l'équivalent ASP.NET du `TestClient` de FastAPI.
+  - `_factory.CreateClient()` = « usine, donne-moi un `HttpClient` **déjà branché** sur l'API que tu as démarrée ». Même logique qu'un **Service** qui reçoit son **Repository** par le constructeur : on ne fait pas `new` soi-même, on demande l'objet tout prêt.
+  - `IClassFixture<WebApplicationFactory<Program>>` = « xUnit, crée l'usine une fois et passe-la à mon constructeur ». C'est de l'**injection par constructeur**, comme dans mes Services.
+  - `await` = « attends le résultat de cette opération longue (un appel HTTP) avant de passer à la ligne suivante ». Une méthode qui utilise `await` doit être marquée `async` et renvoyer `Task`.
+  - Le schéma d'un test : **Arrange** (préparer), **Act** (agir), **Assert** (vérifier).
+  - `Assert.Equal(attendu, obtenu)` : l'ordre compte, la valeur **attendue** vient d'abord.
+
+### `dotnet test` en local et `az acr run` : deux choses différentes
+
+- **Confusion :** je pensais que `dotnet test tests/MonApp.Tests` avait exécuté le YAML et poussé l'image dans l'ACR.
+- **À retenir :**
+  - `dotnet test` (sur mon PC) = lance les tests **localement**. Aucun lien avec Azure, ni avec le YAML, ni avec l'ACR. C'est une vérification avant d'envoyer quoi que ce soit.
+  - `az acr run --file acr-task.yaml <contexte>` = envoie le dossier à Azure et **exécute le YAML dans le cloud**, sur un agent ACR Tasks.
+
+### Les 3 façons d'utiliser ACR Tasks
+
+- **Confusion :** une task YAML est-elle une alternative à `az acr build` ?
+- **À retenir :** oui, ce sont deux façons d'utiliser ACR Tasks, et une troisième s'y ajoute.
+
+  | Commande | Type | Lancement | Push | Équivalent Azure DevOps |
+  |---|---|---|---|---|
+  | `az acr build` | *Quick task* | À la main | **Automatique** | Un pipeline avec une seule tâche *Docker build & push*, lancé à la main |
+  | `az acr run --file x.yaml` | *Quick task* multi-étapes | À la main | **Seulement s'il y a une étape `push`** | *Run pipeline* sur un `azure-pipelines.yml` à plusieurs steps |
+  | `az acr task create` | Tâche **enregistrée** | **Automatique** (commit, image de base, timer) | Selon le YAML ou le Dockerfile | Un pipeline enregistré avec `trigger:` ou `schedules:` |
+
+  - `az acr build` = le **raccourci** pour le cas simple (1 image, push automatique).
+  - Le YAML sert dès qu'on veut **contrôler** le déroulé : tester **avant** de publier.
+
+### Le fichier `acr-task.yaml` : les mots-clés
+
+```yaml
+version: v1.1.0
+steps:
+  - id: build-tests
+    build: -t monapp-tests:$ID --target test .
+  - id: run-tests
+    cmd: monapp-tests:$ID
+  - id: build-image
+    build: -t $Registry/monapp:$ID .
+  - id: push-image
+    push:
+      - $Registry/monapp:$ID
+```
+
+| Mot-clé | Signification |
+|---|---|
+| `version: v1.1.0` | Version du format YAML. Elle **active les alias** courts (`$ID`, `$Registry`…). Sans elle, la valeur par défaut est `v1.0.0` et il faut écrire `{{.Run.ID}}`. |
+| `steps:` | La liste des étapes, exécutées dans l'ordre. Équivalent des `steps:` d'un job Azure DevOps. |
+| `id:` | Le nom de l'étape. Il apparaît dans les logs (`Executing step ID: run-tests`), sert de nom au conteneur, et permet de référencer l'étape dans `when`. |
+| `build:` | Type d'étape = **`docker build`**. Construit une image. Accepte toutes les options de `docker build` (`-t`, `-f`, `--target`, `--build-arg`). |
+| `cmd:` | Type d'étape = **`docker run`**. **Lance un conteneur** à partir d'une image. Ici, ça exécute les tests. |
+| `push:` | Type d'étape = **`docker push`**. Envoie une ou plusieurs images dans le registre. |
+| `-t nom:tag` | Le nom et le tag de l'image construite. |
+| `--target test` | Construit **seulement jusqu'au stage `test`** du Dockerfile, et non l'image finale. |
+| `.` | Le contexte du build = la racine du dossier envoyé. |
+| `$Registry` | Alias de `{{.Run.Registry}}` = l'adresse de **mon** registre (`acrai200david.azurecr.io`). Le YAML marche ainsi avec n'importe quel ACR, sans nom codé en dur. |
+| `$ID` | Alias de `{{.Run.ID}}` = l'**identifiant unique du run** (`dd4`, `dd5`…). Il sert de tag unique, comme `$(Build.BuildId)` dans Azure DevOps. |
+| `$Date`, `$Commit`, `$Branch` | La date du run, et le commit et la branche Git (pour les tasks déclenchées par Git). |
+| `when:` | *(non utilisé ici)* Gère les dépendances : `when: ["-"]` = démarre tout de suite, en parallèle ; `when: ["id1"]` = attend l'étape `id1`. **Sans `when`**, chaque étape attend la précédente. |
+| `ignoreErrors: true` | *(non utilisé ici)* Marque l'étape comme réussie même en cas d'erreur. À éviter sur une étape de tests. |
+
+- ⚠️ **Une task YAML ne pousse JAMAIS automatiquement**, contrairement à `az acr build`. Sans étape `push`, l'image reste sur l'agent puis disparaît à la fin du run.
+- `monapp-tests:$ID` n'a **pas** de `$Registry` devant : cette image n'existe que sur l'agent, pendant le run. Dans les logs, elle apparaît comme `registry.hub.docker.com/library/monapp-tests`, parce qu'un nom sans registre est interprété par convention comme Docker Hub. **Elle n'y a pas été envoyée** : il n'y a pas d'étape `push` pour elle.
+
+### Le Dockerfile à 3 stages (build → test → final)
+
+- **À retenir :**
+  - `build` (image SDK) : compile l'app **et** les tests.
+  - `test` (`FROM build AS test`) : quand on **lance** cette image, elle exécute `dotnet test`.
+  - `final` (image ASP.NET runtime, sans SDK) : l'image **publiée**.
+  - L'image finale ne contient pas le SDK, elle **ne peut donc pas lancer `dotnet test`**. D'où le stage `test`, construit avec `--target test`.
+  - On a mis un **chemin absolu** dans l'`ENTRYPOINT` du test (`/src/tests/...`), parce qu'ACR Tasks peut changer le répertoire de travail des étapes `cmd` (`/workspace`).
+
+### Code de sortie et arrêt de la task : le garde-fou
+
+- **À retenir :**
+  - Chaque programme renvoie un **code de sortie** : **0 = succès**, **autre chose = échec**. `dotnet test` renvoie 1 si au moins un test échoue.
+  - Dans une task, si une étape renvoie un code ≠ 0 : `failed to run step ID: run-tests: exit status 1`, puis **la task s'arrête**, et **les étapes suivantes ne s'exécutent pas**.
+  - Ce qu'on a vérifié :
+
+    | Run | Tests | Push | Image dans l'ACR |
+    |---|---|---|---|
+    | `dd4` | ✅ | ✅ | `monapp:dd4` |
+    | `dd5` (bug `"ko"`) | ❌ | ⛔ jamais exécuté | **aucune** (`dd5` absent de `show-tags`) |
+    | `dd6` (réparé) | ✅ | ✅ | `monapp:dd6` |
+
+  - L'**absence** de `dd5` dans l'ACR est la **preuve** que le garde-fou fonctionne : une version boguée ne peut pas être publiée, ni déployée par erreur.
+  - Équivalent Azure DevOps : une tâche *Test* en échec rend le run rouge, et les tâches suivantes (publication de l'artefact) ne s'exécutent pas.
+
+### GitHub ou Azure DevOps pour les déclencheurs de code source ?
+
+- **Confusion :** je pensais que MS Learn ne parlait pas de GitHub, et qu'il fallait n'utiliser que des services Azure.
+- **À retenir :**
+  - Le module MS Learn dit explicitement : *« ACR Tasks s'intègre à **GitHub et Azure DevOps** »*. Ses exemples de `az acr task create` utilisent même une URL **GitHub** (`--context https://github.com/...#main`).
+  - Les deux sont donc au programme. Ce que l'examen évalue, c'est **ACR Tasks** (déclencheur de code source, PAT, webhook, contexte Git), pas GitHub ni Azure DevOps eux-mêmes.
+  - Les droits du PAT diffèrent selon la plateforme :
+
+    | Dépôt | GitHub | Azure DevOps (Azure Repos) |
+    |---|---|---|
+    | Public | `repo:status` + `public_repo` | Code (Read) |
+    | Privé | `repo` (contrôle total) | Code (Read) |
+
+  - Le **PAT** sert à ACR pour lire le dépôt et **créer le webhook** (la notification envoyée à chaque commit). Bonne pratique : le stocker dans **Key Vault**, jamais dans un script ni dans un commit.
+  - Format du contexte : `https://github.com/<user>/<repo>.git#<branche>:<dossier>` ou `https://dev.azure.com/<org>/<projet>/_git/<repo>#<branche>:<dossier>`.
+
+### `git status` : « modified » ou « untracked » ?
+
+- **Confusion :** `POINTS-A-REVOIR.md` apparaissait dans une autre section que `jour02-acr-tasks/` et `prompts/`.
+- **À retenir :**
+  - **Changes not staged / modified** : fichier **déjà suivi** par Git (présent dans un commit précédent), modifié depuis. C'est le cas de `POINTS-A-REVOIR.md`, commité au jour 1.
+  - **Untracked** : fichier ou dossier **nouveau**, que Git n'a jamais enregistré.
+  - Dans les deux cas, `git add` les ajoute au prochain commit. Équivalent Azure DevOps (Azure Repos) : identique, car c'est Git.
+  - Les commandes `git` sont les mêmes dans PowerShell et dans bash.
+
+### Warning `LF will be replaced by CRLF`
+
+- **Confusion :** des warnings sont apparus pendant `git add`.
+- **À retenir :**
+  - **LF** = fin de ligne Linux, **CRLF** = fin de ligne Windows.
+  - Le `.gitattributes` (`* text=auto`) stocke les fichiers en **LF sur GitHub** et les remet en **CRLF sur mon PC Windows**. Le warning annonce simplement cette conversion : **ce n'est pas une erreur**.
+  - `Dockerfile` et les `*.sh` sont forcés en **LF partout** (`eol=lf`), parce que Linux, et donc le conteneur, ne lit pas bien le CRLF. C'est pour ça qu'ils n'apparaissent pas dans les warnings.

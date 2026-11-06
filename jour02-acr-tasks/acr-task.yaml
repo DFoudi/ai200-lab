@@ -1,0 +1,29 @@
+# =============================================================================
+# Jour 2 : task ACR multi-étapes
+#   build des tests -> exécution des tests -> build de l'image finale -> push
+# Les étapes s'exécutent DANS L'ORDRE (pas de "when") et la task s'arrête à la
+# première étape en échec : si les tests échouent, l'image n'est jamais poussée.
+# Référence : https://learn.microsoft.com/fr-fr/azure/container-registry/container-registry-tasks-reference-yaml
+# =============================================================================
+version: v1.1.0          # version du format YAML (v1.1.0 = alias $Registry, $ID… disponibles)
+
+steps:
+  # 1. Construire l'IMAGE DE TEST (stage "test" du Dockerfile).
+  #    Pas de $Registry devant : elle reste sur l'agent, on ne la poussera jamais.
+  - id: build-tests
+    build: -t monapp-tests:$ID --target test .
+
+  # 2. LANCER l'image de test = exécuter "dotnet test".
+  #    Code de sortie 0 -> on continue ; différent de 0 -> la task échoue ici.
+  - id: run-tests
+    cmd: monapp-tests:$ID
+
+  # 3. Construire l'IMAGE FINALE (dernier stage du Dockerfile), taguée avec l'ID du run.
+  #    $Registry = acrai200david.azurecr.io ; $ID = {{.Run.ID}} (ex. dd5)
+  - id: build-image
+    build: -t $Registry/monapp:$ID .
+
+  # 4. Pousser l'image finale dans l'ACR (une task ne pousse JAMAIS automatiquement).
+  - id: push-image
+    push:
+      - $Registry/monapp:$ID
