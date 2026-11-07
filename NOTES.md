@@ -30,3 +30,38 @@ Commandes : [jour01-acr/commands.sh](jour01-acr/commands.sh)
 - Les builds ACR Tasks sont facturés à la seconde (quelques centimes).
 - Le resource group et le budget sont gratuits.
 - Budget `budget-ai200` : 15 €/mois, alertes à 50/80/100 %. ⚠️ Un budget **alerte mais ne coupe rien**.
+
+---
+
+## Jour 2 : ACR Tasks
+
+Réalisé : des tests xUnit (`WebApplicationFactory`) sur `/health`, un Dockerfile en 3 stages (build / test / final), une task multi-étapes `acr-task.yaml` (build-tests → run-tests → build-image → push-image), une task enregistrée `monapp-ci` avec ses 3 déclencheurs (commit, timer, image de base), puis le nettoyage (task supprimée, PAT révoqué).
+Commandes : [jour02-acr-tasks/commands.sh](jour02-acr-tasks/commands.sh)
+
+### Les 5 points clés pour l'examen
+
+1. **Les 3 façons d'utiliser ACR Tasks.**
+   - `az acr build` = **quick task** : 1 Dockerfile, build et **push automatique**.
+   - `az acr run --file x.yaml` = quick task **multi-étapes**, sans push automatique : il faut une étape `push`.
+   - `az acr task create` = task **enregistrée** dans l'ACR, avec des **déclencheurs**.
+
+   On la relance à la main avec `az acr task run`. Dans `list-runs`, une quick task n'a **pas de nom de task** et a TRIGGER = Manual.
+
+2. **Le YAML multi-étapes** (`version: v1.1.0` pour les alias `$Registry`, `$ID`…). Il y a 3 types d'étapes : `build` (docker build), `cmd` (lancer un conteneur) et `push`. Les étapes s'exécutent **dans l'ordre**, et la task **s'arrête à la première étape en échec** (code de sortie ≠ 0). Si les tests échouent, l'image n'est jamais poussée (preuve : `dd5` absent). `$ID` = `{{.Run.ID}}`, qui sert à taguer chaque image de façon unique.
+
+3. **Le déclencheur de code source** (commit). Il faut `--context https://github.com/<user>/<repo>.git#<branche>:<dossier>` et `--git-access-token <PAT>`. ACR crée un **webhook** sur le dépôt, et chaque push sur la branche lance la task (TRIGGER = Commit). Ça fonctionne avec **GitHub et Azure DevOps**. Droits du PAT GitHub : dépôt public = `repo:status` + `public_repo`, dépôt privé = `repo`. Azure DevOps = Code (Read).
+
+4. **Le déclencheur minuteur.** `--schedule` à la création, ou `az acr task timer add --timer-name … --schedule "…"`. Expression **cron à 5 champs** (`minute heure jour mois jour-semaine`), **en UTC**, sans secondes ni année, fréquence maximale 1 fois par minute. Une task peut avoir **plusieurs** minuteurs. Exemple : `"0 12 * * Mon-Fri"` = midi UTC en semaine.
+
+5. **Le déclencheur d'image de base**, activé **par défaut**. ACR enregistre les images de base du Dockerfile (`baseImageDependencies` : `dotnet/sdk`, `dotnet/aspnet` + digest). Quand l'image de base est mise à jour (correctif OS ou framework), ACR **reconstruit automatiquement** l'image : c'est le **patching automatique**.
+
+### Nettoyage et sécurité
+
+- `az acr task delete` supprime la task, ses déclencheurs **et le webhook**. Le **PAT doit être révoqué à la main** sur GitHub.
+- Un secret affiché (capture, chat, log) est **compromis** : on le révoque et on le régénère. En production, on le range dans **Key Vault**.
+- Ce qu'on a fait est du **CI** (build, test, publication de l'image), pas encore du **CD** (déploiement automatique sur App Service ou Container Apps).
+
+### Coûts
+
+- Les runs ACR Tasks sont facturés **à la seconde** : environ 1 min 20 par run, soit quelques centimes.
+- Il reste **uniquement l'ACR Basic** (~5 $/mois). Les images `dd4` à `dd9` occupent quelques centaines de Mo, inclus dans les 10 Go.

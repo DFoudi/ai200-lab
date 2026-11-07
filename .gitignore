@@ -11,3 +11,6 @@ obj/
 .env
 *.env
 appsettings.*.local.json
+
+# Notes personnelles (restent uniquement sur le PC)
+POINTS-A-REVOIR.md
