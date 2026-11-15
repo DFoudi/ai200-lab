@@ -65,3 +65,74 @@ Commandes : [jour02-acr-tasks/commands.sh](jour02-acr-tasks/commands.sh)
 
 - Les runs ACR Tasks sont facturés **à la seconde** : environ 1 min 20 par run, soit quelques centimes.
 - Il reste **uniquement l'ACR Basic** (~5 $/mois). Les images `dd4` à `dd9` occupent quelques centaines de Mo, inclus dans les 10 Go.
+
+---
+
+## Jour 3 : déployer un conteneur sur Azure App Service
+
+Réalisé :
+- un plan App Service Linux B1 et l'application web `app-ai200-david`, qui exécute l'image `monapp:dd9` de l'ACR ;
+- le téléchargement de l'image par **identité managée** (rôle RBAC AcrPull) ;
+- des App Settings (`WEBSITES_PORT`, `APP_MESSAGE`) ;
+- un secret Key Vault lu via une **référence Key Vault** ;
+- les journaux du conteneur en direct ;
+- le nettoyage (attribution AcrPull, groupe de ressources, purge du Key Vault).
+
+Commandes : [jour03-app-service/commands.sh](jour03-app-service/commands.sh)
+Module MS Learn : [Déployer des conteneurs sur Azure App Service](https://learn.microsoft.com/fr-fr/training/modules/deploy-containers-azure-app-service/)
+
+### Les 5 points clés pour l'examen
+
+1. **Plan ≠ application web.**
+   - Le **plan App Service** (`Microsoft.Web/serverFarms`) contient les VM qu'on paie : OS, région, niveau tarifaire, nombre d'instances. Un conteneur Linux demande un plan **Linux** (`--is-linux`).
+   - L'**application web** (`Microsoft.Web/sites`) est la configuration de lancement du conteneur : image, App Settings, port, URL `*.azurewebsites.net`.
+   - Les applications web d'un même plan partagent ses VM.
+
+2. **Télécharger l'image depuis l'ACR : l'identité managée est la bonne réponse.**
+   - On active l'identité managée de l'application web (`az webapp identity assign`).
+   - On lui attribue le rôle RBAC **AcrPull** sur l'ACR.
+   - On active `acrUseManagedIdentityCreds: true`.
+   - Il n'y a aucun mot de passe à stocker ni à faire tourner, contrairement à l'utilisateur admin de l'ACR (déconseillé) ou à un principal de service avec un secret.
+   - L'image est téléchargée à chaque démarrage, redémarrage ou scale out.
+
+3. **App Settings = variables d'environnement du conteneur.**
+   - Elles **écrasent** `appsettings.json`. Ordre ASP.NET Core : `appsettings.json` → `appsettings.{Env}.json` → User Secrets → variables d'environnement → ligne de commande.
+   - **Modifier un App Setting redémarre l'application.**
+   - `WEBSITES_PORT` indique le port d'écoute du conteneur (80 par défaut).
+   - App Settings (`configuration["X"]`) ≠ Connection Strings (`GetConnectionString("X")`).
+   - Un **slot setting** reste attaché à son emplacement lors d'un swap.
+
+4. **La référence Key Vault** : dans un App Setting, on met une référence au lieu du secret.
+   - Les deux syntaxes :
+     ```
+     @Microsoft.KeyVault(SecretUri=https://<coffre>.vault.azure.net/secrets/<nom>/<version>)
+     @Microsoft.KeyVault(VaultName=<coffre>;SecretName=<nom>;SecretVersion=<version>)
+     ```
+   - La version est facultative. Sans version, App Service prend la **dernière version**, rafraîchie sous **24 h** ; une modification de config la recharge tout de suite.
+   - Conditions :
+     - l'identité managée de l'application web a le rôle RBAC **Key Vault Secrets User** (lecture) ;
+     - pour créer un secret, il faut **Key Vault Secrets Officer**.
+   - **Symptôme d'échec** (rôle manquant, syntaxe fausse, secret supprimé) : l'application reçoit le **texte brut** `@Microsoft.KeyVault(...)`. Le portail l'affiche dans Variables d'environnement, colonne Source « Coffre de clés » : coche verte = résolue.
+
+5. **Key Vault : suppression réversible et purge.**
+   - Un Key Vault supprimé (même via `az group delete`) part dans une « corbeille » pendant **90 jours**. Il y est récupérable (`az keyvault recover`), et son nom reste **réservé**.
+   - `az keyvault purge` le supprime définitivement, **sauf** si la **protection contre la purge** est activée : personne ne peut alors purger avant la fin de la rétention.
+   - Un groupe de ressources n'a **pas** de corbeille.
+
+### Pièges rencontrés
+
+- PowerShell + `az` : les parenthèses d'une référence Key Vault sont mangées. Il faut utiliser `az --% ... "DB_PASSWORD=@Microsoft.KeyVault(...)"`.
+- `MissingSubscriptionRegistration` : le fournisseur de ressources n'est pas enregistré. On lance `az provider register --namespace Microsoft.KeyVault`.
+- Une attribution de rôle est stockée sur la ressource **cible** : l'attribution AcrPull était dans `rg-ai200-socle`. Il faut la supprimer avant le groupe de ressources du jour, sinon elle reste orpheline.
+- Tag **unique** (`dd9`) pour déployer, tag **stable** (`latest`) pour les images de base.
+
+### Coûts
+
+- Le plan B1 était gratuit le premier mois, puis coûte environ 13 €/mois. Le Key Vault Standard est facturé à l'opération (quelques centimes).
+- Après nettoyage, il reste **uniquement l'ACR Basic** (~5 $/mois).
+
+---
+
+## À faire en fin de parcours (révision examen)
+
+- [ ] **Lab bonus, environ 20 min : déclencheur de mise à jour d'image de base (ACR Tasks).** Créer sa propre image de base dans l'ACR, la modifier, et vérifier que la tâche se relance toute seule (`az acr task list-runs` → TRIGGER = Image Update). Tutoriel : [Automatiser les builds d'images conteneur quand une image de base est mise à jour](https://learn.microsoft.com/fr-fr/azure/container-registry/container-registry-tutorial-base-image-update)
