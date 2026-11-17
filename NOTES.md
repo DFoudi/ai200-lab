@@ -133,6 +133,62 @@ Module MS Learn : [Déployer des conteneurs sur Azure App Service](https://learn
 
 ---
 
+## Jour 4 : side-car sur Azure App Service
+
+Réalisé : une application web App Service **en mode side-car**, avec 2 conteneurs C# :
+- `chat-api`, le conteneur **principal**, sur le port 8080 ;
+- `model-server`, un faux modèle d'IA en **side-car**, sur le port 5000.
+
+Les deux images sont téléchargées depuis l'ACR par identité managée. `GET /chat?question=…` appelle le side-car via `localhost:5000`. On a aussi diagnostiqué une vraie panne de side-car (image introuvable).
+Code et commandes : [jour04-sidecar/](jour04-sidecar/) · [commands.sh](jour04-sidecar/commands.sh)
+Module MS Learn : [Exécuter des applications d'IA avec side-car sur Azure App Service](https://learn.microsoft.com/fr-fr/training/modules/deploy-sidecar-azure-app-service/)
+
+### Les 5 points clés pour l'examen
+
+1. **Un side-car est un conteneur auxiliaire dans la même application web.**
+   - Il y a **un seul** conteneur principal (`isMain: true`), le **seul** à recevoir le trafic externe, et jusqu'à **9 side-cars** (`isMain: false`).
+   - Linux uniquement.
+   - Usages typiques : petit modèle d'IA local (extension **Phi-3/Phi-4**, `POST localhost:11434/v1/chat/completions`), cache **Redis** local (`localhost:6379`), télémétrie (OpenTelemetry).
+
+2. **Le cycle de vie est partagé.** Les conteneurs démarrent, s'arrêtent et se mettent à l'échelle **ensemble** : 3 instances = 3 API + 3 side-cars. Ils consomment le CPU et la RAM du **même** plan.
+   - **Un side-car en échec arrête toute l'application web**, y compris le conteneur principal.
+   - On choisit un **service séparé** quand le composant est partagé par plusieurs applications, a besoin d'un **GPU**, doit se mettre à l'échelle **indépendamment** ou doit rester disponible quand l'API redémarre.
+
+3. **Réseau et fichiers.**
+   - Tous les conteneurs partagent le même réseau : ils s'appellent par **`localhost:<port>`**, avec **un port unique par conteneur**.
+   - Le trafic externe n'arrive que sur le principal, port **80 ou 8080**.
+   - Le volume **`/home`** est monté dans tous les conteneurs par défaut. Des montages de volume permettent de partager des fichiers entre conteneurs.
+   - Les **App Settings sont partagés** par tous les conteneurs. On peut les surcharger par conteneur (`environmentVariables`).
+
+4. **La configuration est différente du conteneur classique.**
+   - Création : `az webapp create … --sitecontainers-app` (`LinuxFxVersion=sitecontainers`), puis `az webapp sitecontainers create` par conteneur.
+   - Conversion d'une application existante : `az webapp sitecontainers convert --mode sitecontainers`.
+   - **`WEBSITES_PORT` et `DOCKER_REGISTRY_SERVER_*` ne s'appliquent plus.**
+   - Le téléchargement d'image par identité managée se règle **par conteneur** : `--system-assigned-identity true` (`authType: SystemIdentity`) ou `--user-assigned-identity <clientId>`. Il faut toujours le rôle RBAC **AcrPull** sur l'ACR.
+
+5. **Diagnostiquer.**
+   - `az webapp log tail` montre les journaux de **tous** les conteneurs.
+   - Les autres outils : `az webapp sitecontainers log` / `status`, et le portail (Diagnostiquer et résoudre les problèmes).
+   - Les causes classiques :
+     - **image introuvable** (`ImageNotFoundFailure`) : faute de frappe dans le nom ou le tag, non détectée à la création ;
+     - **AcrPull manquant** ;
+     - **deux conteneurs sur le même port** ;
+     - **RAM insuffisante** pour le modèle.
+   - `LastError` est la **dernière** erreur (historique). `Site started` indique que le site tourne.
+
+### Pièges rencontrés
+
+- **Nom du conteneur ≠ nom de l'image** : le premier est libre, le second doit exister exactement dans l'ACR.
+- **`localhost` dépend de qui l'appelle** : depuis mon navigateur, c'est mon PC. Un side-car n'est jamais joignable depuis Internet.
+- `az resource list` liste les **ressources** ; `az group list` liste les **groupes de ressources**.
+
+### Coûts
+
+- Plan B1 utilisé environ 45 min, soit quelques centimes. Supprimé le soir même, ainsi que l'attribution AcrPull.
+- Les images `chat-api:v1` et `model-server:v1` restent dans l'ACR (incluses dans les 10 Go du Basic).
+
+---
+
 ## À faire en fin de parcours (révision examen)
 
 - [ ] **Lab bonus, environ 20 min : déclencheur de mise à jour d'image de base (ACR Tasks).** Créer sa propre image de base dans l'ACR, la modifier, et vérifier que la tâche se relance toute seule (`az acr task list-runs` → TRIGGER = Image Update). Tutoriel : [Automatiser les builds d'images conteneur quand une image de base est mise à jour](https://learn.microsoft.com/fr-fr/azure/container-registry/container-registry-tutorial-base-image-update)
