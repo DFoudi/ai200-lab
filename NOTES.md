@@ -189,6 +189,73 @@ Module MS Learn : [Exécuter des applications d'IA avec side-car sur Azure App S
 
 ---
 
+## Jour 5 : Azure Container Apps, environnement, secrets et révisions
+
+Réalisé (parcours 2) :
+- un environnement Container Apps (Consommation, avec Log Analytics créé automatiquement) ;
+- la container app `monapp:dd9`, téléchargée depuis l'ACR par identité managée, avec une entrée externe sur le port 8000 ;
+- des variables d'environnement et un secret (`secretref:`) ;
+- puis un **déploiement canary** : mode multiple, révision `v2`, trafic 80/20, label `beta`, bascule à 100 % et désactivation de l'ancienne révision.
+
+Commandes : [jour05-container-apps/commands.sh](jour05-container-apps/commands.sh)
+
+### Les 5 points clés pour l'examen
+
+1. **App Service / Container Apps / AKS.**
+   - **App Service** : une application web (site, API).
+   - **Container Apps** : des **microservices** en conteneurs, serverless, **mise à l'échelle jusqu'à 0** (KEDA), répartition du trafic entre révisions, Dapr intégré. Il tourne sur Kubernetes, **sans accès à l'API Kubernetes**.
+   - **AKS** : quand on a besoin de l'**API Kubernetes** et du contrôle complet du cluster.
+   - Un **environnement** est la frontière sécurisée des apps. Les apps d'un environnement partagent le **même réseau virtuel** et le **même Log Analytics**.
+   - Plans : **Consommation** (payer à l'usage, 0 possible) ou **profils de charge de travail dédiés** (machines réservées, GPU possible, coût fixe).
+
+2. **Une révision est un instantané immuable de la section `template`.**
+
+   | Modification | Portée | Nouvelle révision ? |
+   |---|---|---|
+   | Image, variables d'environnement, CPU/RAM | révision (`properties.template`) | ✅ Oui |
+   | Règles de mise à l'échelle, suffixe de révision (`--revision-suffix`) | révision (`properties.template`) | ✅ Oui |
+   | **Secrets** | application (`properties.configuration`) | ❌ Non |
+   | Entrée (ingress), **répartition du trafic**, **labels** | application | ❌ Non |
+   | Mode de révision, identifiants de registre, Dapr | application | ❌ Non |
+
+   - Un **secret modifié** n'est pas vu par les révisions en cours : elles ont lu la valeur **à leur démarrage**. Il faut **redémarrer** la révision (`az containerapp revision restart`) ou en déployer une nouvelle.
+
+3. **Mode single ou multiple.**
+   - **Single** (par défaut) : une seule révision active. La nouvelle remplace l'ancienne **sans interruption** : l'ancienne garde 100 % du trafic tant que la nouvelle n'est pas prête.
+   - **Multiple** : plusieurs révisions actives, avec un **trafic réparti en %** (`az containerapp ingress traffic set --revision-weight a=80 b=20`, total = 100).
+   - **Canary** : un petit % vers la nouvelle version, puis on augmente.
+   - **Blue/green** : deux versions complètes, puis une bascule d'un coup.
+   - Avant de créer une nouvelle révision en mode multiple, il faut **épingler** le trafic sur la révision actuelle. Sinon, la règle `latestRevision: true` lui donne 100 % immédiatement.
+   - On met d'abord **0 % de trafic**, ensuite on **désactive** : une révision inactive ne coûte rien et reste réactivable.
+
+4. **Labels et URL.**
+   - URL principale : `https://<app>.<domaine-env>/`, avec la répartition du trafic.
+   - URL de révision : `https://<app>--<suffixe>.<domaine-env>/`, qui change à chaque révision.
+   - URL de **label** : `https://<app>---<label>.<domaine-env>/`, avec **3 tirets**.
+   - Un label est **déplaçable** d'une révision à l'autre en gardant la même URL (idéal pour des testeurs).
+   - Le label et la répartition du trafic sont **indépendants**.
+
+5. **Identité managée et secrets.**
+   - `az containerapp create --registry-identity system --registry-server <acr>` crée l'identité **et l'attribution AcrPull** automatiquement.
+   - Mais cette commande crée d'abord une révision avec une **image publique**, puis une avec mon image : l'identité affectée par le système n'existe qu'**après** la création de l'app.
+   - MS Learn recommande plutôt une identité **affectée par l'utilisateur** (créée avant, réutilisable).
+   - Secret : `--secrets db-pass=<valeur>`, puis la variable `DB_PASSWORD=secretref:db-pass`.
+   - Secret depuis **Key Vault** : `--secrets "db-pass=keyvaultref:<URI-du-secret>,identityref:<id-identité>"`, avec le rôle **Key Vault Secrets User**. Sans version dans l'URI, la nouvelle version est récupérée **sous 30 min** (App Service : 24 h).
+
+### Pièges rencontrés
+
+- `revision list` sans `--all` n'affiche que les révisions **actives**.
+- Relancer `create` sur une app existante la met à jour, mais refait toute la procédure (2 révisions). Pour modifier, on utilise **`update`**.
+- `az containerapp revision restart` : `--revision <nom>` est un **paramètre**, pas un mot de la commande.
+- 20 appels en 80/20 ont donné 14/6 : la répartition est aléatoire par requête.
+
+### Coûts
+
+- Plan Consommation : quelques centimes, voire 0 € grâce à la franchise mensuelle. Groupe de ressources supprimé, attribution AcrPull supprimée.
+- Il ne reste que l'ACR Basic.
+
+---
+
 ## À faire en fin de parcours (révision examen)
 
 - [ ] **Lab bonus, environ 20 min : déclencheur de mise à jour d'image de base (ACR Tasks).** Créer sa propre image de base dans l'ACR, la modifier, et vérifier que la tâche se relance toute seule (`az acr task list-runs` → TRIGGER = Image Update). Tutoriel : [Automatiser les builds d'images conteneur quand une image de base est mise à jour](https://learn.microsoft.com/fr-fr/azure/container-registry/container-registry-tutorial-base-image-update)
