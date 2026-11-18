@@ -47,14 +47,21 @@ Chaque dossier contient un `commands.sh` : toutes les commandes du lab, dans l'o
 
 Prérequis : [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
+Seuls les jours 1, 2 et 4 contiennent du code C# : les jours 3 et 5 réutilisent l'image `monapp` du jour 2 et ne contiennent que des commandes Azure.
+
 ```bash
-# API du jour 1, sur le port 8000 (le même que dans le conteneur)
+# Jour 1 : l'API, sur le port 8000 (le même que dans le conteneur)
 cd jour01-acr/app
 ASPNETCORE_HTTP_PORTS=8000 dotnet run          # PowerShell : $env:ASPNETCORE_HTTP_PORTS=8000; dotnet run
 # puis : http://localhost:8000/health
 
-# Tests du jour 2
+# Jour 2 : les tests xUnit
 dotnet test jour02-acr-tasks/tests/MonApp.Tests
+
+# Jour 4 : l'API principale + le side-car, dans 2 terminaux
+ASPNETCORE_HTTP_PORTS=5000 dotnet run --project jour04-sidecar/model-server   # le side-car
+ASPNETCORE_HTTP_PORTS=8080 dotnet run --project jour04-sidecar/chat-api       # l'API principale
+# puis : http://localhost:8080/chat?question=Bonjour
 ```
 
 Pour rejouer un lab sur Azure : suivre le `commands.sh` du dossier (un compte Azure et Azure CLI sont nécessaires ; les ressources sont payantes tant qu'elles existent).
