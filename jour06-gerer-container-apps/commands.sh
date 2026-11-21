@@ -53,3 +53,31 @@ az containerapp logs show --name monapp --resource-group rg-ai200-jour06 --type 
 # 4. Réparation : remettre le port cible de l'entrée sur le port d'écoute de l'API
 # -----------------------------------------------------------------------------
 az containerapp ingress update --name monapp --resource-group rg-ai200-jour06 --target-port 8000
+
+# -----------------------------------------------------------------------------
+# 5. Sondes et ressources
+# -----------------------------------------------------------------------------
+# 5.1 sondes définies dans la configuration ?
+az containerapp show --name monapp --resource-group rg-ai200-jour06 --query "properties.template.containers[0].probes" --output json
+#   -> VIDE : aucune sonde écrite. Avec l'entrée activée, Container Apps applique des sondes TCP PAR DÉFAUT
+#      "en coulisse" sur le port cible de l'entrée (d'où la boucle de redémarrage avec le port 80)
+#   Sonde HTTP personnalisée (ex. GET /health -> 200-399) : à définir en YAML / ARM / Bicep
+#   Startup = a démarré ? (échec -> tué/redémarré) ; Liveness = toujours vivant ? (échec -> redémarré)
+#   Readiness = prêt pour du trafic ? (échec -> plus de trafic, PAS redémarré)
+
+# 5.2 taille des réplicas + nombre min/max
+az containerapp update --name monapp --resource-group rg-ai200-jour06 --cpu 0.25 --memory 0.5Gi --min-replicas 1 --max-replicas 3
+#   -> NOUVELLE révision monapp--0000002 : resources et scale sont dans "template" (portée révision)
+#   CPU/RAM par paires imposées (0.25/0.5Gi, 0.5/1Gi, 1/2Gi...) ; ephemeralStorage suit (2Gi -> 1Gi)
+#   min 1 = pas de démarrage à froid mais coût permanent ; max 3 = plafond de facture
+
+# -----------------------------------------------------------------------------
+# 6. Nettoyage (il ne reste que l'ACR)
+# -----------------------------------------------------------------------------
+$principalId = az containerapp identity show --name monapp --resource-group rg-ai200-jour06 --query principalId --output tsv
+$registryId = az acr show --name acrai200david --query id --output tsv
+az role assignment delete --assignee $principalId --role AcrPull --scope $registryId
+#   piège : "--scope registryId" (sans $) -> Azure reçoit le TEXTE "registryId" -> erreur MissingSubscription
+az role assignment list --assignee $principalId --scope $registryId --output table    # vide
+az group delete --name rg-ai200-jour06 --yes --no-wait     # --no-wait : rend la main tout de suite
+az group list --output table                               # à vérifier plus tard : rg-ai200-jour06 a disparu

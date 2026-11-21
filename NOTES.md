@@ -256,6 +256,69 @@ Commandes : [jour05-container-apps/commands.sh](jour05-container-apps/commands.s
 
 ---
 
+## Jour 6 : gérer des conteneurs dans Azure Container Apps
+
+Réalisé (parcours 2, module 2) :
+- une container app `monapp` cassée volontairement (port cible de l'entrée 8000 → 80) ;
+- le diagnostic : état des révisions, puis **journaux système** ;
+- la réparation, la lecture des sondes, puis l'ajustement du CPU, de la RAM et des réplicas.
+
+Commandes : [jour06-gerer-container-apps/commands.sh](jour06-gerer-container-apps/commands.sh)
+Module MS Learn : [Gérer des conteneurs dans Azure Container Apps](https://learn.microsoft.com/fr-fr/training/modules/manage-containers-azure-container-apps/)
+
+### Les 5 points clés pour l'examen
+
+1. **Deux états par révision.**
+   - **Approvisionnement** : la révision a-t-elle démarré ? (`Provisioned` / `Failed`)
+   - **Exécution** : tourne-t-elle bien ? (`Running`, `Degraded`, `Failed`, mise à l'échelle à 0…)
+   - On les lit avec `az containerapp revision list --query "[].{…properties.runningState, properties.healthState, properties.replicas}"`.
+   - En mode single, une nouvelle révision en échec laisse le trafic sur l'ancienne.
+
+2. **Journaux console ou système.**
+   - `az containerapp logs show --type console` montre ce que **mon code** écrit (`ILogger`).
+   - `--type system` montre ce que fait **la plateforme** (image téléchargée, conteneur démarré ou tué, **sondes en échec**).
+   - Options : `--tail N` (les N derniers messages), `--follow` (en direct).
+   - **Si l'app ne démarre pas ou redémarre en boucle, la cause est dans les journaux système.**
+
+3. **Le résumé `revision list` peut tromper.**
+   - Avec un mauvais port d'entrée, il affichait `Healthy` (un **ancien** réplica encore sain), alors que l'app renvoyait `upstream connect error … Connection refused`.
+   - Les journaux système montraient la vérité : `Probe of StartUp failed` × 240, puis `terminated … ProbeFailure`, puis redémarrage en boucle.
+   - `Connection refused` = **personne n'écoute sur ce port** → vérifier `--target-port`.
+
+4. **Sondes d'intégrité.**
+
+   | Sonde | Question | En cas d'échec |
+   |---|---|---|
+   | **Startup** | A-t-il fini de démarrer ? | Conteneur tué et redémarré au-delà du seuil |
+   | **Liveness** | Est-il toujours vivant ? | Conteneur redémarré |
+   | **Readiness** | Est-il prêt à recevoir du trafic ? | Retiré du trafic, **pas** redémarré |
+
+   - Types : **TCP** (le port est-il ouvert ?) ou **HTTP** (un code de réponse entre 200 et 399). Pas de sonde `exec`, ni gRPC.
+   - **Si aucune sonde n'est définie et que l'entrée est activée**, Container Apps applique des **sondes TCP par défaut sur le port cible de l'entrée**. Elles ne sont pas écrites dans la configuration.
+   - Valeurs par défaut de la sonde de démarrage : 1 s, seuil de 240 échecs.
+   - Une sonde HTTP personnalisée se définit en YAML, ARM ou Bicep.
+
+5. **Ressources et mise à l'échelle.**
+   - `--cpu` / `--memory` : la taille de **chaque réplica**, par paires imposées (0,25/0,5 Gi, 0,5/1 Gi, 1/2 Gi…).
+   - `--min-replicas` / `--max-replicas` : le **nombre** de réplicas.
+     - min **0** = mise à l'échelle à zéro (pas de coût, mais démarrage à froid) ;
+     - min **1** = toujours prêt, mais coût permanent ;
+     - **max** = plafond de la facture.
+   - Ces réglages sont dans `template`, donc ils **créent une révision**. Le port cible de l'entrée est dans `configuration`, donc il n'en crée pas.
+   - **Réplica** = une copie du conteneur qui tourne. **Révision** = quelle version ; **réplica** = combien de copies.
+
+### Pièges rencontrés
+
+- Variable PowerShell sans `$` (`--scope registryId`) : Azure reçoit le texte brut, d'où l'erreur `MissingSubscription`.
+- `az group delete --no-wait` évite d'attendre les ~10 min de suppression d'un environnement Container Apps.
+
+### Coûts
+
+- Ressources gardées 3 jours entre deux séances (plan Consommation, ≈ 0 € tant que `min-replicas` = 0).
+- `min-replicas 1` rend le coût permanent : supprimé le soir même. Attribution AcrPull supprimée.
+
+---
+
 ## À faire en fin de parcours (révision examen)
 
 - [ ] **Lab bonus, environ 20 min : déclencheur de mise à jour d'image de base (ACR Tasks).** Créer sa propre image de base dans l'ACR, la modifier, et vérifier que la tâche se relance toute seule (`az acr task list-runs` → TRIGGER = Image Update). Tutoriel : [Automatiser les builds d'images conteneur quand une image de base est mise à jour](https://learn.microsoft.com/fr-fr/azure/container-registry/container-registry-tutorial-base-image-update)

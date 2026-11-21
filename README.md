@@ -16,6 +16,7 @@ Tout est fait en **Azure CLI**, en suivant les parcours **Microsoft Learn** du c
 | 3 | **Azure App Service** | Conteneur Linux sur App Service, pull depuis ACR par **identité managée** (rôle AcrPull), App Settings, **références Key Vault**, journaux en direct | [`jour03-app-service`](jour03-app-service) |
 | 4 | **Side-cars App Service** | Application à 2 conteneurs C# : API principale + faux modèle d'IA en side-car, communication via `localhost`, diagnostic d'une vraie panne de démarrage | [`jour04-sidecar`](jour04-sidecar) |
 | 5 | **Azure Container Apps** | Environnement Consommation + Log Analytics, secrets (`secretref:`), **révisions**, déploiement **canary 80/20**, labels, bascule et désactivation | [`jour05-container-apps`](jour05-container-apps) |
+| 6 | **Gérer et dépanner Container Apps** | Panne volontaire (mauvais port d'entrée), diagnostic par les **journaux système** (sonde de démarrage en échec, redémarrage en boucle), réparation, **sondes d'intégrité**, réglage CPU/RAM et réplicas min/max | [`jour06-gerer-container-apps`](jour06-gerer-container-apps) |
 
 Chaque dossier contient un `commands.sh` : toutes les commandes du lab, dans l'ordre, commentées (y compris les erreurs rencontrées et leur correction).
 
