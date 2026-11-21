@@ -39,3 +39,17 @@ az containerapp ingress update --name monapp --resource-group rg-ai200-jour06 --
 az containerapp revision list --name monapp --resource-group rg-ai200-jour06 --query "[].{revision:name, active:properties.active, approvisionnement:properties.provisioningState, execution:properties.runningState, sante:properties.healthState, replicas:properties.replicas}" --output table
 #   monapp--0000001  True  Provisioned  Running  Healthy  2
 #   réplica = une copie du conteneur en train de tourner (≈ une instance du plan App Service / un serveur d'une ferme IIS)
+
+# 3.2 journaux SYSTÈME (la plateforme) : c'est là qu'est la vraie cause
+#     (navigateur : "... delayed connect error: Connection refused" = personne n'écoute sur ce port)
+az containerapp logs show --name monapp --resource-group rg-ai200-jour06 --type system --tail 30
+#   "Probe of StartUp failed with status code: 1"   (Count 233 ... 240)
+#   "Container monapp failed startup probe, will be restarted"
+#   "Container 'monapp' was terminated ... reason 'ProbeFailure'"  -> Pulling image -> Started -> ... BOUCLE
+#   sonde de démarrage PAR DÉFAUT : TCP sur le PORT CIBLE DE L'ENTRÉE (donc 80), période 1 s, seuil d'échec 240
+#   "Healthy" dans revision list = résumé trompeur (un ancien réplica encore sain) -> lire les journaux système
+
+# -----------------------------------------------------------------------------
+# 4. Réparation : remettre le port cible de l'entrée sur le port d'écoute de l'API
+# -----------------------------------------------------------------------------
+az containerapp ingress update --name monapp --resource-group rg-ai200-jour06 --target-port 8000
