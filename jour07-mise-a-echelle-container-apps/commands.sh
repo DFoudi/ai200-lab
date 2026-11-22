@@ -55,3 +55,38 @@ az containerapp replica list --name monapp --resource-group rg-ai200-jour07 --qu
 #   pendant : 5 réplicas = 20 requêtes / concurrence 1 = 20 voulus, plafonnés à 5
 #   tous dans la même révision 0000001 : la mise à l'échelle ajoute des copies, pas de révision
 #   après ~300 s sans trafic (refroidissement) : retour à 0 réplica
+
+# -----------------------------------------------------------------------------
+# 4. Règle KEDA sur une file d'attente Azure Storage
+# -----------------------------------------------------------------------------
+# 4.1 Compte de stockage
+az storage account create --name stai200david07 --resource-group rg-ai200-jour07 --location francecentral --sku Standard_LRS --query provisioningState
+#   1re tentative : SubscriptionNotFound -> en réalité le fournisseur Microsoft.Storage n'était pas enregistré
+az provider show --namespace Microsoft.Storage --query registrationState      # "NotRegistered"
+az provider register --namespace Microsoft.Storage --wait                     # une fois par abonnement
+# 4.2 Chaîne de connexion dans une variable (JAMAIS affichée), puis file "jobs"
+$conn = az storage account show-connection-string --name stai200david07 --resource-group rg-ai200-jour07 --query connectionString --output tsv
+az storage queue create --name jobs --connection-string $conn
+# 4.3 Secret de l'app (configuration -> pas de nouvelle révision, message "must be restarted")
+az containerapp secret set --name monapp --resource-group rg-ai200-jour07 --secrets "queue-conn=$conn" --output none
+az containerapp secret list --name monapp --resource-group rg-ai200-jour07 --query "[].name" --output table
+# 4.4 Règle KEDA azure-queue (template -> nouvelle révision 0000002)
+#   20 messages / queueLength 5 = 4 réplicas ; auth : paramètre "connection" du scaler = secret queue-conn
+az containerapp update --name monapp --resource-group rg-ai200-jour07 --min-replicas 0 --max-replicas 5 --scale-rule-name queue-rule --scale-rule-type azure-queue --scale-rule-metadata "queueName=jobs" "queueLength=5" "accountName=stai200david07" --scale-rule-auth "connection=queue-conn" --query properties.latestRevisionName
+az containerapp show --name monapp --resource-group rg-ai200-jour07 --query "properties.template.scale" --output json
+#   ATTENTION : update a REMPLACÉ les règles -> seule "queue-rule" reste, "http-rule" a disparu
+# 4.5 Dépôt de 20 messages, observation, vidage
+1..20 | ForEach-Object { az storage message put --queue-name jobs --content "job-$_" --connection-string $conn --output none }
+az containerapp replica list --name monapp --resource-group rg-ai200-jour07 --query "[].name" --output table
+#   -> 4 réplicas de la révision 0000002 (les 5 de la 0000001 ont disparu : mode révision unique)
+az storage message clear --queue-name jobs --connection-string $conn --output none
+#   -> après ~300 s (refroidissement) : 0 réplica
+
+# -----------------------------------------------------------------------------
+# 5. Nettoyage : attribution AcrPull d'abord (elle vit sur l'ACR), puis le groupe de ressources
+# -----------------------------------------------------------------------------
+$principalId = az containerapp show --name monapp --resource-group rg-ai200-jour07 --query identity.principalId --output tsv
+$registryId = az acr show --name acrai200david --query id --output tsv
+az role assignment delete --assignee $principalId --role AcrPull --scope $registryId
+az group delete --name rg-ai200-jour07 --yes --no-wait
+az group list --query "[].{nom:name, etat:properties.provisioningState}" --output table

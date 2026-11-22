@@ -319,6 +319,61 @@ Module MS Learn : [Gérer des conteneurs dans Azure Container Apps](https://lear
 
 ---
 
+## Jour 7 : mettre à l'échelle des conteneurs dans Azure Container Apps (HTTP, KEDA)
+
+Réalisé (parcours 2, module 3) :
+- une container app `monapp` avec une **règle HTTP** (concurrence 1, 0 à 5 réplicas), chargée par un programme C# (`HttpClient`, 20 requêtes en parallèle) → montée de 1 à **5 réplicas** ;
+- la même app avec une **règle KEDA `azure-queue`** sur une file Azure Storage : 20 messages déposés → **4 réplicas** sans aucune requête HTTP, puis file vidée → retour à 0.
+
+Commandes : [jour07-mise-a-echelle-container-apps/commands.sh](jour07-mise-a-echelle-container-apps/commands.sh)
+Module MS Learn : [Mettre à l'échelle des conteneurs dans Azure Container Apps](https://learn.microsoft.com/fr-fr/training/modules/scale-containers-azure-container-apps/)
+
+### Les 5 points clés pour l'examen
+
+1. **Valeurs par défaut.**
+   - `minReplicas` 0, `maxReplicas` 10 (jusqu'à 1000).
+   - Sans règle définie : règle **HTTP**, concurrence **10** requêtes simultanées par réplica.
+   - Règles personnalisées : interrogation toutes les **30 s**, refroidissement de **300 s** avant de passer de 1 réplica à 0.
+
+2. **Le calcul des réplicas.**
+   - Réplicas voulus = valeur mesurée ÷ objectif, **arrondi au supérieur**, puis plafonné par `maxReplicas`.
+   - HTTP : 20 requêtes simultanées ÷ concurrence 1 = 20 → plafonné à **5**.
+   - File : 20 messages ÷ `queueLength=5` = **4**.
+   - La mise à l'échelle ajoute des **réplicas** de la même révision ; elle ne crée pas de révision.
+
+3. **KEDA = mise à l'échelle pilotée par les événements.**
+   - `--scale-rule-type` : le type du scaler KEDA (`azure-queue`, `azure-servicebus`, …).
+   - `--scale-rule-metadata` : les paires `clé=valeur` du scaler (`queueName=jobs queueLength=5 accountName=…`).
+   - `--scale-rule-auth "connection=<secret>"` : relie le paramètre d'authentification du scaler à un **secret de l'app** (nom de 20 caractères au maximum).
+   - Alternative sans secret : `--scale-rule-identity` (identité managée).
+
+4. **Les règles font partie du `template`.**
+   - Ajouter ou modifier une règle **crée une révision** (0000001 → 0000002).
+   - `az containerapp update --scale-rule-name …` **remplace** la liste des règles : la règle HTTP a disparu. Pour en garder plusieurs, les déclarer ensemble (YAML).
+   - Plusieurs règles : la mise à l'échelle démarre dès que **la première** condition est remplie.
+   - Microsoft recommande le **mode de révision unique** avec des règles non HTTP.
+
+5. **Coûts et performances.**
+   - `min 0` = rien à payer sans activité, mais **démarrage à froid** ; `min 1` = toujours prêt, coût permanent.
+   - `max` = plafond de la facture.
+   - Sans entrée HTTP et sans règle personnalisée, une app à `min 0` **ne redémarre jamais**.
+   - Profils de charge de travail : **Consommation** (facturé à l'usage) ou **Dédié** (machines réservées, GPU, gros besoins).
+
+### Pièges rencontrés
+
+- **Quota : 1 seul environnement Container Apps par région** pour cet abonnement. Un environnement « ScheduledForDelete » compte encore (plus de 15 min). Un environnement ne se renomme pas.
+- `westeurope` : « not accepting new customers » (région fermée aux nouveaux abonnements).
+- `az storage account create` → `SubscriptionNotFound` : le **fournisseur de ressources `Microsoft.Storage` n'était pas enregistré**. Réparé par `az provider register --namespace Microsoft.Storage --wait`.
+- Chaîne de connexion rangée dans `$conn` (`--output tsv`), jamais affichée.
+- `secret set` : « must be restarted » → un secret ne crée pas de révision. Ici, la révision créée par la nouvelle règle l'a pris en compte.
+
+### Coûts
+
+- Environnement Consommation : ≈ 0 € à 0 réplica ; compte de stockage Standard_LRS : quelques centimes.
+- Tout supprimé le soir même (attribution AcrPull, puis groupe de ressources avec `--no-wait`).
+
+---
+
 ## À faire en fin de parcours (révision examen)
 
 - [ ] **Lab bonus, environ 20 min : déclencheur de mise à jour d'image de base (ACR Tasks).** Créer sa propre image de base dans l'ACR, la modifier, et vérifier que la tâche se relance toute seule (`az acr task list-runs` → TRIGGER = Image Update). Tutoriel : [Automatiser les builds d'images conteneur quand une image de base est mise à jour](https://learn.microsoft.com/fr-fr/azure/container-registry/container-registry-tutorial-base-image-update)

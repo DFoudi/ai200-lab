@@ -17,6 +17,7 @@ Tout est fait en **Azure CLI**, en suivant les parcours **Microsoft Learn** du c
 | 4 | **Side-cars App Service** | Application à 2 conteneurs C# : API principale + faux modèle d'IA en side-car, communication via `localhost`, diagnostic d'une vraie panne de démarrage | [`jour04-sidecar`](jour04-sidecar) |
 | 5 | **Azure Container Apps** | Environnement Consommation + Log Analytics, secrets (`secretref:`), **révisions**, déploiement **canary 80/20**, labels, bascule et désactivation | [`jour05-container-apps`](jour05-container-apps) |
 | 6 | **Gérer et dépanner Container Apps** | Panne volontaire (mauvais port d'entrée), diagnostic par les **journaux système** (sonde de démarrage en échec, redémarrage en boucle), réparation, **sondes d'intégrité**, réglage CPU/RAM et réplicas min/max | [`jour06-gerer-container-apps`](jour06-gerer-container-apps) |
+| 7 | **Mise à l'échelle Container Apps** | Règle **HTTP** testée par un outil de charge **C#** (`HttpClient` en parallèle, 1 → 5 réplicas), règle **KEDA** sur une file Azure Storage (20 messages → 4 réplicas, puis retour à 0), secret pour l'authentification du scaler | [`jour07-mise-a-echelle-container-apps`](jour07-mise-a-echelle-container-apps) |
 
 Chaque dossier contient un `commands.sh` : toutes les commandes du lab, dans l'ordre, commentées (y compris les erreurs rencontrées et leur correction).
 
