@@ -17,3 +17,12 @@ az acr build --registry acrai200david --image "session-api:{{.Run.ID}}" jour08-s
 #   -> Run ID: ddc was successful after 1m3s  => image acrai200david.azurecr.io/session-api:ddc
 # Vérifier le tag dans l'ACR
 az acr repository show-tags --name acrai200david --repository session-api --output table
+
+# -----------------------------------------------------------------------------
+# 2. Groupe de ressources et environnement (obligatoire pour un pool de type CustomContainer)
+# -----------------------------------------------------------------------------
+az group create --name rg-ai200-jour08 --location francecentral --query properties.provisioningState
+#   --no-wait : la création (3-5 min) continue dans Azure, on peut fermer le terminal
+#   rappel : 1 seul environnement Container Apps par région pour cet abonnement
+az containerapp env create --name env-ai200-jour08 --resource-group rg-ai200-jour08 --location francecentral --no-wait
+az containerapp env list --resource-group rg-ai200-jour08 --query "[].{nom:name, etat:properties.provisioningState}" --output table
