@@ -1,7 +1,11 @@
 # Jour 8 : sessions dynamiques dans Azure Container Apps
 
 > Parcours MS Learn 2 : **Déployer et gérer des applications sur Azure Container Apps**
-> Module 4 : **sessions dynamiques** (titre exact et unités à relever dans le parcours MS Learn au début de la séance)
+> Module 4 : **Exécuter du code généré par l'IA en toute sécurité dans Azure Container Apps sessions dynamiques**
+> https://learn.microsoft.com/fr-fr/training/modules/dynamic-sessions-azure-container-apps/
+> Unités : 1. Introduction · 2. Choisir un pool de sessions dynamiques · 3. Configurer un pool de sessions sécurisées ·
+> 4. Exécuter du code et échanger des fichiers · 5. Gérer les échecs de cycle de vie et d'exécution ·
+> 6. Exercice · 7. Évaluation du module · 8. Résumé
 > Docs : [Sessions dynamiques](https://learn.microsoft.com/fr-fr/azure/container-apps/sessions) ·
 > [Pools de sessions](https://learn.microsoft.com/fr-fr/azure/container-apps/session-pool) ·
 > [Sessions de conteneur personnalisé](https://learn.microsoft.com/fr-fr/azure/container-apps/sessions-custom-container)
