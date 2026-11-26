@@ -26,3 +26,30 @@ az group create --name rg-ai200-jour08 --location francecentral --query properti
 #   rappel : 1 seul environnement Container Apps par région pour cet abonnement
 az containerapp env create --name env-ai200-jour08 --resource-group rg-ai200-jour08 --location francecentral --no-wait
 az containerapp env list --resource-group rg-ai200-jour08 --query "[].{nom:name, etat:properties.provisioningState}" --output table
+
+# -----------------------------------------------------------------------------
+# 3. Identité managée AFFECTÉE PAR L'UTILISATEUR + AcrPull (avant le pool : il tire l'image dès sa création)
+# -----------------------------------------------------------------------------
+$identityId = az identity create --name id-ai200-jour08 --resource-group rg-ai200-jour08 --location francecentral --query id --output tsv
+$identityPrincipalId = az identity show --name id-ai200-jour08 --resource-group rg-ai200-jour08 --query principalId --output tsv
+$registryId = az acr show --name acrai200david --query id --output tsv
+#   --assignee-principal-type ServicePrincipal : évite la recherche dans Entra ID (identité toute neuve)
+az role assignment create --assignee-object-id $identityPrincipalId --assignee-principal-type ServicePrincipal --role AcrPull --scope $registryId
+#   vérification (la sortie de "create" n'a pas de champ roleDefinitionName, celle de "list" oui)
+az role assignment list --assignee $identityPrincipalId --scope $registryId --query "[].roleDefinitionName" --output tsv
+
+# -----------------------------------------------------------------------------
+# 4. Pool de sessions de type conteneur personnalisé
+# -----------------------------------------------------------------------------
+#   1re tentative avec --mi-user-assigned $identityId EN PLUS de --registry-identity $identityId :
+#     InvalidRequestContent "duplicate JSON property names" -> --registry-identity ajoute déjà l'identité au pool
+az containerapp sessionpool create --name pool-ai200-jour08 --resource-group rg-ai200-jour08 --environment env-ai200-jour08 --location francecentral --container-type CustomContainer --image acrai200david.azurecr.io/session-api:ddc --target-port 8080 --registry-server acrai200david.azurecr.io --registry-identity $identityId --cpu 0.25 --memory 0.5Gi --max-sessions 5 --ready-sessions 1 --cooldown-period 300 --network-status EgressDisabled --query properties.poolManagementEndpoint
+#   -> "https://pool-ai200-jour08.<domaine-environnement>.francecentral.azurecontainerapps.io"
+
+# -----------------------------------------------------------------------------
+# 5. Rôle "Azure ContainerApps Session Executor" à MON compte sur le pool (le rôle Propriétaire ne suffit pas)
+# -----------------------------------------------------------------------------
+$poolId = az containerapp sessionpool show --name pool-ai200-jour08 --resource-group rg-ai200-jour08 --query id --output tsv
+$myId = az ad signed-in-user show --query id --output tsv
+az role assignment create --assignee-object-id $myId --assignee-principal-type User --role "Azure ContainerApps Session Executor" --scope $poolId --output none
+az role assignment list --assignee $myId --scope $poolId --query "[].roleDefinitionName" --output tsv
