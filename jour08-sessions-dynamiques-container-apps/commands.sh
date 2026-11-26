@@ -53,3 +53,22 @@ $poolId = az containerapp sessionpool show --name pool-ai200-jour08 --resource-g
 $myId = az ad signed-in-user show --query id --output tsv
 az role assignment create --assignee-object-id $myId --assignee-principal-type User --role "Azure ContainerApps Session Executor" --scope $poolId --output none
 az role assignment list --assignee $myId --scope $poolId --query "[].roleDefinitionName" --output tsv
+
+# -----------------------------------------------------------------------------
+# 6. Client C# (session-client/) : jeton Entra (AzureCliCredential, audience https://dynamicsessions.io)
+# -----------------------------------------------------------------------------
+#   Navigateur sur l'adresse du pool -> "403 / Unauthenticated." : pas de jeton Bearer (authentification),
+#   même si le rôle Session Executor est attribué (autorisation)
+$env:SESSION_POOL_ENDPOINT = az containerapp sessionpool show --name pool-ai200-jour08 --resource-group rg-ai200-jour08 --query properties.poolManagementEndpoint --output tsv
+dotnet run --project jour08-sessions-dynamiques-container-apps/session-client -- note alice "Note d'Alice"   # 200, conteneur A
+dotnet run --project jour08-sessions-dynamiques-container-apps/session-client -- note bob "Note de Bob"       # 200, conteneur B (isolation)
+dotnet run --project jour08-sessions-dynamiques-container-apps/session-client -- lire alice
+#   -> 429 TooManyRequests "Error happened when allocating pod" : la session d'Alice n'existait plus,
+#      le pool devait en attribuer une nouvelle et n'en avait pas de prête (erreur transitoire : GET relancé)
+dotnet run --project jour08-sessions-dynamiques-container-apps/session-client -- sessions
+#   -> seule "bob" ; expiresAt = createdAt + 300 s (--cooldown-period)
+#   2e "lire alice" : 200, NOUVEAU conteneur, notes [] -> la note d'Alice est perdue
+#   LEÇON : une session n'est PAS un stockage durable ; même identifier = parfois session neuve et vide
+dotnet run --project jour08-sessions-dynamiques-container-apps/session-client -- lire bob    # ["Note de Bob"]
+dotnet run --project jour08-sessions-dynamiques-container-apps/session-client -- stop bob    # "Session bob ... stopped."
+dotnet run --project jour08-sessions-dynamiques-container-apps/session-client -- lire bob    # nouveau conteneur, notes []
